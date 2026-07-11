@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { deleteRow, getRow, listRows } from "@/lib/butterbase";
+import { deleteLearnerSession } from "@/lib/everos";
 import type {
   EvidenceKey,
   EvidenceSignal,
@@ -228,6 +229,7 @@ export async function DELETE(
       );
     }
 
+    await deleteLearnerSession(session.id);
     await deleteRow("exam_sessions", session.id);
 
     return NextResponse.json({ deletedSessionId: session.id });

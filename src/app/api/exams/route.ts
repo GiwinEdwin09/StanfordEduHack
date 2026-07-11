@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { insertRow } from "@/lib/butterbase";
+import { recallLearnerMemory } from "@/lib/everos";
 import { generateOpeningQuestion } from "@/lib/examiner";
 import {
   startExamRequestSchema,
@@ -23,7 +24,13 @@ export async function POST(request: Request) {
     }
 
     const participantId = parsed.data.participantId ?? randomUUID();
-    const opening = await generateOpeningQuestion(parsed.data.topic);
+    const memory = await recallLearnerMemory(
+      `${parsed.data.topic}: prior strengths, growth, feedback acted on, recurring gaps, and assessment history`,
+    );
+    const opening = await generateOpeningQuestion(
+      parsed.data.topic,
+      memory.context,
+    );
     const session = await insertRow<ExamSessionRow>("exam_sessions", {
       participant_id: participantId,
       topic: parsed.data.topic,
@@ -54,6 +61,12 @@ export async function POST(request: Request) {
         conceptTag: question.concept_tag,
         questionType: question.question_type,
         maxTurns: 5,
+        memory: {
+          available: memory.available,
+          learner: memory.learner,
+          highlights: memory.highlights.slice(0, 3),
+          recalledCount: memory.episodes.length + memory.profiles.length,
+        },
       },
       { status: 201 },
     );

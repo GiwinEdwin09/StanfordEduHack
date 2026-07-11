@@ -7,6 +7,11 @@ import {
   computeIntegrityEvidence,
 } from "@/lib/integrity";
 import {
+  addLearnerMessages,
+  flushLearnerSession,
+  recallLearnerMemory,
+} from "@/lib/everos";
+import {
   MAX_EXAM_TURNS,
   submitAnswerRequestSchema,
   type ExamQuestionRow,
@@ -70,10 +75,15 @@ export async function POST(
       );
     }
 
-    const priorResponses = await listRows<ResponseRow>("responses", {
-      session_id: `eq.${sessionId}`,
-      order: "turn_index.asc",
-    });
+    const [priorResponses, memory] = await Promise.all([
+      listRows<ResponseRow>("responses", {
+        session_id: `eq.${sessionId}`,
+        order: "turn_index.asc",
+      }),
+      recallLearnerMemory(
+        `${session.topic}: ${question.question} — prior strengths, misconceptions, feedback response, and demonstrated growth`,
+      ),
+    ]);
     const expectedTurn = priorResponses.length + 1;
 
     if (question.turn_index !== expectedTurn) {
@@ -106,6 +116,7 @@ export async function POST(
       answer: parsed.data.answer,
       conceptTag: question.concept_tag,
       questionType: question.question_type,
+      learnerMemory: memory.context,
       history: priorResponses.map((response) => ({
         id: response.id,
         question: response.question,
@@ -224,6 +235,42 @@ export async function POST(
         : {}),
     });
 
+    let memoryStored = true;
+    const memoryTimestamp = Date.now();
+
+    try {
+      await addLearnerMessages(sessionId, [
+        {
+          role: "assistant",
+          timestamp: memoryTimestamp,
+          content: `Oral exam question ${question.turn_index} on ${session.topic}: ${question.question}`,
+        },
+        {
+          role: "user",
+          timestamp: memoryTimestamp + 1,
+          content: parsed.data.answer,
+        },
+        {
+          role: "assistant",
+          timestamp: memoryTimestamp + 2,
+          content: [
+            `Evaluation: ${evaluation.overallScore}/10 overall and ${evaluation.depthScore}/10 depth.`,
+            evaluation.feedback,
+            completed
+              ? "The oral exam is complete."
+              : `Next question: ${evaluation.nextQuestion}`,
+          ].join(" "),
+        },
+      ]);
+
+      if (completed) {
+        await flushLearnerSession(sessionId);
+      }
+    } catch (memoryError) {
+      memoryStored = false;
+      console.error("Failed to persist EverOS learner memory", memoryError);
+    }
+
     return NextResponse.json({
       responseId: response.id,
       evaluation: {
@@ -239,6 +286,12 @@ export async function POST(
       },
       integrity,
       runningScores,
+      memory: {
+        available: memory.available,
+        stored: memoryStored,
+        highlights: memory.highlights.slice(0, 3),
+        recalledCount: memory.episodes.length + memory.profiles.length,
+      },
       completed,
       next: !nextQuestion
         ? null

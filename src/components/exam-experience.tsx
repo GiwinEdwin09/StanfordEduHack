@@ -13,6 +13,10 @@ import type {
 
 const topicOptions = [
   {
+    name: "Literary Analysis",
+    description: "Thesis, evidence, and growth across essays",
+  },
+  {
     name: "Computer Networks",
     description: "Protocols, reliability, and tradeoffs",
   },
@@ -54,11 +58,25 @@ interface RunningScores {
   integrityRisk: number;
 }
 
+interface MemoryStatus {
+  available: boolean;
+  stored?: boolean;
+  learner?: {
+    userId: string;
+    displayName: string;
+    age: number;
+    grade: string;
+  };
+  highlights: string[];
+  recalledCount: number;
+}
+
 interface StartExamResponse extends QuestionState {
   sessionId: string;
   participantId: string;
   topic: string;
   maxTurns: number;
+  memory: MemoryStatus;
   error?: string;
 }
 
@@ -69,6 +87,7 @@ interface SubmitAnswerResponse {
   runningScores: RunningScores;
   completed: boolean;
   next: QuestionState | null;
+  memory: MemoryStatus;
   error?: string;
 }
 
@@ -133,6 +152,7 @@ export default function ExamExperience() {
   const [runningScores, setRunningScores] = useState<RunningScores | null>(
     null,
   );
+  const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -429,6 +449,7 @@ export default function ExamExperience() {
       });
       setTranscript([]);
       setRunningScores(null);
+      setMemoryStatus(data.memory);
       setAnswer("");
       setElapsedSeconds(0);
       questionStartedAt.current = Date.now();
@@ -480,6 +501,10 @@ export default function ExamExperience() {
         },
       ]);
       setRunningScores(data.runningScores);
+      setMemoryStatus((current) => ({
+        ...data.memory,
+        learner: current?.learner,
+      }));
       setAnswer("");
 
       if (data.completed || !data.next) {
@@ -521,6 +546,7 @@ export default function ExamExperience() {
     setQuestion(null);
     setTranscript([]);
     setRunningScores(null);
+    setMemoryStatus(null);
     setAnswer("");
     setError(null);
     setElapsedSeconds(0);
@@ -553,6 +579,12 @@ export default function ExamExperience() {
               Question {question.turnIndex} of {maxTurns}
             </span>
           ) : null}
+          <Link
+            href="/memory"
+            className="text-sm font-medium text-[var(--muted)] transition hover:text-[var(--foreground)]"
+          >
+            Learner memory
+          </Link>
           {phase !== "active" ? (
             <Link
               href="/history"
@@ -594,10 +626,27 @@ export default function ExamExperience() {
             </h1>
             <p className="mt-7 max-w-2xl text-lg leading-8 text-[var(--muted)] sm:text-xl">
               The examiner adapts to every answer, probes the reasoning, and
-              gives specific feedback as you go.
+              gives specific feedback as you go—while EverOS recalls how this
+              learner has grown across earlier sessions.
             </p>
+            <Link
+              href="/memory"
+              className="mt-7 flex max-w-xl items-center justify-between rounded-2xl border border-[var(--line)] bg-white/65 p-4 transition hover:border-[#929991]"
+            >
+              <span>
+                <span className="block text-xs font-semibold uppercase tracking-[0.12em] text-[var(--muted)]">
+                  EverOS learner
+                </span>
+                <span className="mt-1 block text-sm font-semibold">
+                  Sofia Reyes · four prior writing sessions
+                </span>
+              </span>
+              <span className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-bold">
+                Open memory
+              </span>
+            </Link>
             <div className="mt-10 grid max-w-xl grid-cols-3 gap-3">
-              {["5 questions", "Adaptive depth", "Voice + text"].map(
+              {["5 questions", "Learner memory", "Voice + text"].map(
                 (item, index) => (
                   <div
                     key={item}
@@ -835,6 +884,49 @@ export default function ExamExperience() {
             </div>
 
             <aside className="space-y-5">
+              <div className="rounded-[2rem] border border-[var(--line)] bg-[var(--foreground)] p-5 text-white">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold">EverOS recall</p>
+                    <p className="mt-1 text-xs text-white/55">
+                      Sofia&apos;s cross-session context
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${
+                      memoryStatus?.available
+                        ? "bg-[var(--accent)] text-[var(--foreground)]"
+                        : "bg-white/10 text-white/60"
+                    }`}
+                  >
+                    {memoryStatus?.available ? "Connected" : "Fallback"}
+                  </span>
+                </div>
+                {memoryStatus?.available ? (
+                  <>
+                    <p className="mt-5 text-sm leading-6 text-white/75">
+                      {memoryStatus.highlights[0] ??
+                        "Prior profile context is shaping this exam."}
+                    </p>
+                    <p className="mt-4 text-xs text-white/50">
+                      {memoryStatus.recalledCount} relevant memory item
+                      {memoryStatus.recalledCount === 1 ? "" : "s"} recalled
+                    </p>
+                  </>
+                ) : (
+                  <p className="mt-5 text-sm leading-6 text-white/65">
+                    The exam is continuing without learner memory. Scoring and
+                    voice remain available.
+                  </p>
+                )}
+                <Link
+                  href="/memory"
+                  className="mt-5 inline-block text-xs font-semibold text-[var(--accent)]"
+                >
+                  Reveal Sofia&apos;s memory →
+                </Link>
+              </div>
+
               <div className="rounded-[2rem] border border-[var(--line)] bg-white/70 p-5">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-semibold">Live evaluation</p>
