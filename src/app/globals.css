@@ -36,3 +36,13 @@ textarea {
   background: var(--accent);
   color: var(--foreground);
 }
+
+@media print {
+  body {
+    background: white;
+  }
+
+  @page {
+    margin: 1.2cm;
+  }
+}

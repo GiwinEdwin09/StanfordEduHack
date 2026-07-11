@@ -106,3 +106,12 @@ export function updateRow<T>(
     },
   ).then(unwrapData);
 }
+
+export function deleteRow(table: string, id: string) {
+  return butterbaseRequest<unknown>(
+    `${encodeURIComponent(table)}/${encodeURIComponent(id)}`,
+    {
+      method: "DELETE",
+    },
+  );
+}
