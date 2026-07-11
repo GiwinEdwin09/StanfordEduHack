@@ -11,7 +11,7 @@ import type {
 } from "@/lib/exam";
 import type { ReportTurn, SessionReport } from "@/lib/report";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 const signalOrder: EvidenceKey[] = [
   "reference_similarity",

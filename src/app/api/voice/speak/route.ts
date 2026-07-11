@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-export const runtime = "nodejs";
-
 const speechRequestSchema = z.object({
   text: z.string().trim().min(1).max(2_000),
 });
+
+export const runtime = "edge";
 
 export async function POST(request: Request) {
   try {

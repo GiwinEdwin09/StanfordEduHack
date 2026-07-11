@@ -1,7 +1,7 @@
 import OpenAI, { toFile } from "openai";
 import { NextResponse } from "next/server";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 const supportedTypes = new Set([

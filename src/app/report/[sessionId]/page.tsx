@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import IntegrityReport from "@/components/integrity-report";
 
+export const runtime = "edge";
+
 export const metadata: Metadata = {
   title: "Integrity report — Viva",
   description: "Review the evidence behind an adaptive oral exam.",

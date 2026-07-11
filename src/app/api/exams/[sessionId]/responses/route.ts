@@ -19,7 +19,7 @@ import {
   type ResponseRow,
 } from "@/lib/exam";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 function average(values: number[]) {
   if (values.length === 0) {

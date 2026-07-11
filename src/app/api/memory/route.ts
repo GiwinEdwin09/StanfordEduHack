@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getLearnerMemory } from "@/lib/everos";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function GET() {
   const memory = await getLearnerMemory();

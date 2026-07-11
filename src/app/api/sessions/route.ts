@@ -4,7 +4,7 @@ import { listRows } from "@/lib/butterbase";
 import type { ExamSessionRow } from "@/lib/exam";
 import type { SessionHistoryItem } from "@/lib/report";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 function numberFrom(
   scores: Record<string, unknown>,

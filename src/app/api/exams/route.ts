@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { insertRow } from "@/lib/butterbase";
 import { recallLearnerMemory } from "@/lib/everos";
@@ -9,7 +8,7 @@ import {
   type ExamSessionRow,
 } from "@/lib/exam";
 
-export const runtime = "nodejs";
+export const runtime = "edge";
 
 export async function POST(request: Request) {
   try {
@@ -23,7 +22,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const participantId = parsed.data.participantId ?? randomUUID();
+    const participantId = parsed.data.participantId ?? crypto.randomUUID();
     const memory = await recallLearnerMemory(
       `${parsed.data.topic}: prior strengths, growth, feedback acted on, recurring gaps, and assessment history`,
     );
