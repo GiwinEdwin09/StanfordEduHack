@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { QuestionType, TurnEvaluation } from "@/lib/exam";
+import type {
+  EvidenceSignal,
+  IntegrityEvidence,
+  PublicTurnEvaluation,
+  QuestionType,
+} from "@/lib/exam";
 
 const topicOptions = [
   {
@@ -23,11 +28,11 @@ const topicOptions = [
 ];
 
 interface QuestionState {
+  questionId: string;
   turnIndex: number;
   question: string;
   conceptTag: string;
   questionType: QuestionType;
-  followUpOf: string | null;
   difficulty: number;
 }
 
@@ -35,13 +40,15 @@ interface TranscriptTurn {
   question: QuestionState;
   answer: string;
   latencyMs: number;
-  evaluation: TurnEvaluation;
+  evaluation: PublicTurnEvaluation;
+  integrity: IntegrityEvidence;
 }
 
 interface RunningScores {
   overall: number;
   depth: number;
   turns: number;
+  integrityRisk: number;
 }
 
 interface StartExamResponse extends QuestionState {
@@ -54,7 +61,8 @@ interface StartExamResponse extends QuestionState {
 
 interface SubmitAnswerResponse {
   responseId: string;
-  evaluation: TurnEvaluation;
+  evaluation: PublicTurnEvaluation;
+  integrity: IntegrityEvidence;
   runningScores: RunningScores;
   completed: boolean;
   next: QuestionState | null;
@@ -98,6 +106,60 @@ function ScoreBar({ label, score }: { label: string; score: number }) {
         />
       </div>
     </div>
+  );
+}
+
+function evidenceTone(status: EvidenceSignal["status"]) {
+  if (status === "flag") return "bg-[#ffd5c9] text-[#7c2d17]";
+  if (status === "review") return "bg-[#fff0a8] text-[#6b5311]";
+  if (status === "clear") return "bg-[#dff5b1] text-[#365314]";
+  return "bg-[#edf0e9] text-[var(--muted)]";
+}
+
+function EvidenceSignalCard({
+  signal,
+  compact = false,
+}: {
+  signal: EvidenceSignal;
+  compact?: boolean;
+}) {
+  return (
+    <article className="rounded-2xl border border-[var(--line)] bg-white p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold">{signal.label}</p>
+        <span
+          className={`rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${evidenceTone(signal.status)}`}
+        >
+          {signal.status}
+        </span>
+      </div>
+      <p
+        className={`${compact ? "line-clamp-2" : ""} mt-3 text-xs leading-5 text-[var(--muted)]`}
+      >
+        {signal.summary}
+      </p>
+      {signal.metrics.length > 0 ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {signal.metrics.map((metric) => (
+            <span
+              key={`${signal.key}-${metric.label}`}
+              className="rounded-lg bg-[#f3f4ee] px-2 py-1 text-[10px]"
+            >
+              {metric.label}: <strong>{metric.value}</strong>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {!compact && signal.evidence.length > 0 ? (
+        <div className="mt-3 space-y-1 border-t border-[var(--line)] pt-3">
+          {signal.evidence.map((item) => (
+            <p key={item} className="text-[11px] leading-5 text-[var(--muted)]">
+              {item}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </article>
   );
 }
 
@@ -157,11 +219,11 @@ export default function ExamExperience() {
       setSessionId(data.sessionId);
       setMaxTurns(data.maxTurns);
       setQuestion({
+        questionId: data.questionId,
         turnIndex: data.turnIndex,
         question: data.question,
         conceptTag: data.conceptTag,
         questionType: data.questionType,
-        followUpOf: data.followUpOf,
         difficulty: data.difficulty,
       });
       setTranscript([]);
@@ -194,13 +256,9 @@ export default function ExamExperience() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            question: question.question,
+            questionId: question.questionId,
             answer: submittedAnswer,
-            conceptTag: question.conceptTag,
-            questionType: question.questionType,
-            turnIndex: question.turnIndex,
             latencyMs,
-            followUpOf: question.followUpOf,
           }),
         },
       );
@@ -217,6 +275,7 @@ export default function ExamExperience() {
           answer: submittedAnswer,
           latencyMs,
           evaluation: data.evaluation,
+          integrity: data.integrity,
         },
       ]);
       setRunningScores(data.runningScores);
@@ -313,7 +372,7 @@ export default function ExamExperience() {
               gives specific feedback as you go.
             </p>
             <div className="mt-10 grid max-w-xl grid-cols-3 gap-3">
-              {["5 questions", "Adaptive depth", "Live scoring"].map(
+              {["5 questions", "Adaptive depth", "Evidence receipts"].map(
                 (item, index) => (
                   <div
                     key={item}
@@ -517,6 +576,40 @@ export default function ExamExperience() {
                 )}
               </div>
 
+              <div className="rounded-[2rem] border border-[var(--line)] bg-white/70 p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold">Evidence monitor</p>
+                    <p className="mt-1 text-xs text-[var(--muted)]">
+                      Signals with receipts
+                    </p>
+                  </div>
+                  {latestTurn ? (
+                    <span
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${evidenceTone(latestTurn.integrity.verdict)}`}
+                    >
+                      {latestTurn.integrity.overallRisk} risk
+                    </span>
+                  ) : null}
+                </div>
+                {latestTurn ? (
+                  <div className="mt-4 space-y-2">
+                    {latestTurn.integrity.signals.map((signal) => (
+                      <EvidenceSignalCard
+                        key={signal.key}
+                        signal={signal}
+                        compact
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-5 text-sm leading-6 text-[var(--muted)]">
+                    Reference wording, depth decay, consistency, and timing
+                    will be evaluated independently.
+                  </p>
+                )}
+              </div>
+
               <div className="rounded-[2rem] bg-[var(--foreground)] p-5 text-white">
                 <p className="text-xs font-semibold uppercase tracking-[0.12em] text-white/50">
                   Session average
@@ -528,8 +621,9 @@ export default function ExamExperience() {
                   <span className="pb-1 text-xs text-white/50">out of 10</span>
                 </div>
                 <p className="mt-4 border-t border-white/10 pt-4 text-xs leading-5 text-white/60">
-                  Questions adapt from difficulty 1 to 5 based on the quality
-                  of your reasoning.
+                  Integrity evidence risk:{" "}
+                  <strong>{runningScores?.integrityRisk ?? "—"}</strong>. No
+                  single weak signal can determine the result.
                 </p>
               </div>
             </aside>
@@ -591,6 +685,22 @@ export default function ExamExperience() {
                   <p className="mt-1 text-xs text-white/50">Answers assessed</p>
                 </div>
               </div>
+              <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="flex items-end justify-between">
+                  <div>
+                    <p className="text-2xl font-semibold">
+                      {runningScores?.integrityRisk ?? "—"}
+                      <span className="text-sm text-white/40">/100</span>
+                    </p>
+                    <p className="mt-1 text-xs text-white/50">
+                      Evidence-based integrity risk
+                    </p>
+                  </div>
+                  <span className="text-xs text-white/40">
+                    strongest signals
+                  </span>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={resetExam}
@@ -605,7 +715,7 @@ export default function ExamExperience() {
                 <div>
                   <p className="text-lg font-semibold">Answer review</p>
                   <p className="mt-1 text-sm text-[var(--muted)]">
-                    What the examiner saw in each response
+                    Scores and evidence behind every signal
                   </p>
                 </div>
                 <span className="text-xs text-[var(--muted)]">
@@ -637,6 +747,17 @@ export default function ExamExperience() {
                     <p className="mt-4 rounded-xl bg-[#f3f4ee] px-3 py-2.5 text-xs leading-5">
                       {turn.evaluation.feedback}
                     </p>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {turn.integrity.signals
+                        .filter((signal) => signal.status !== "pending")
+                        .map((signal) => (
+                          <EvidenceSignalCard
+                            key={signal.key}
+                            signal={signal}
+                            compact
+                          />
+                        ))}
+                    </div>
                   </article>
                 ))}
               </div>

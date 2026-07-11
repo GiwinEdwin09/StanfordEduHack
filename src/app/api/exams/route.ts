@@ -4,6 +4,7 @@ import { insertRow } from "@/lib/butterbase";
 import { generateOpeningQuestion } from "@/lib/examiner";
 import {
   startExamRequestSchema,
+  type ExamQuestionRow,
   type ExamSessionRow,
 } from "@/lib/exam";
 
@@ -29,18 +30,29 @@ export async function POST(request: Request) {
       difficulty: 2,
       status: "active",
     });
+    const question = await insertRow<ExamQuestionRow>("exam_questions", {
+      session_id: session.id,
+      turn_index: 1,
+      question: opening.question,
+      concept_tag: opening.conceptTag,
+      question_type: "baseline",
+      difficulty: 2,
+      reference_answer: opening.referenceAnswer,
+      follow_up_of: null,
+      paraphrase_of: null,
+    });
 
     return NextResponse.json(
       {
         sessionId: session.id,
         participantId,
         topic: session.topic,
-        difficulty: session.difficulty,
-        turnIndex: 1,
-        question: opening.question,
-        conceptTag: opening.conceptTag,
-        questionType: "baseline",
-        followUpOf: null,
+        questionId: question.id,
+        difficulty: question.difficulty,
+        turnIndex: question.turn_index,
+        question: question.question,
+        conceptTag: question.concept_tag,
+        questionType: question.question_type,
         maxTurns: 5,
       },
       { status: 201 },

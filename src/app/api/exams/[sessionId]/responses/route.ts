@@ -3,8 +3,13 @@ import { z } from "zod";
 import { getRow, insertRow, listRows, updateRow } from "@/lib/butterbase";
 import { evaluateTurn } from "@/lib/examiner";
 import {
+  aggregateIntegrityRisk,
+  computeIntegrityEvidence,
+} from "@/lib/integrity";
+import {
   MAX_EXAM_TURNS,
   submitAnswerRequestSchema,
+  type ExamQuestionRow,
   type ExamSessionRow,
   type ResponseRow,
 } from "@/lib/exam";
@@ -46,12 +51,22 @@ export async function POST(
       );
     }
 
-    const session = await getRow<ExamSessionRow>("exam_sessions", sessionId);
+    const [session, question] = await Promise.all([
+      getRow<ExamSessionRow>("exam_sessions", sessionId),
+      getRow<ExamQuestionRow>("exam_questions", parsed.data.questionId),
+    ]);
 
     if (session.status !== "active") {
       return NextResponse.json(
         { error: "This exam has already ended." },
         { status: 409 },
+      );
+    }
+
+    if (question.session_id !== sessionId) {
+      return NextResponse.json(
+        { error: "That question does not belong to this exam." },
+        { status: 403 },
       );
     }
 
@@ -61,7 +76,7 @@ export async function POST(
     });
     const expectedTurn = priorResponses.length + 1;
 
-    if (parsed.data.turnIndex !== expectedTurn) {
+    if (question.turn_index !== expectedTurn) {
       return NextResponse.json(
         {
           error:
@@ -71,33 +86,72 @@ export async function POST(
       );
     }
 
+    const followUpTarget = question.follow_up_of
+      ? priorResponses.find(
+          (response) => response.id === question.follow_up_of,
+        )
+      : undefined;
+    const consistencyTarget = question.paraphrase_of
+      ? priorResponses.find(
+          (response) => response.id === question.paraphrase_of,
+        )
+      : undefined;
+    const firstResponse = priorResponses[0];
+
     const evaluation = await evaluateTurn({
       topic: session.topic,
-      difficulty: session.difficulty,
-      turnIndex: parsed.data.turnIndex,
-      question: parsed.data.question,
+      difficulty: question.difficulty,
+      turnIndex: question.turn_index,
+      question: question.question,
       answer: parsed.data.answer,
-      conceptTag: parsed.data.conceptTag,
-      questionType: parsed.data.questionType,
+      conceptTag: question.concept_tag,
+      questionType: question.question_type,
       history: priorResponses.map((response) => ({
+        id: response.id,
         question: response.question,
         answer: response.answer,
         score: response.score,
       })),
+      consistencyTarget: consistencyTarget
+        ? {
+            question: consistencyTarget.question,
+            answer: consistencyTarget.answer,
+          }
+        : undefined,
+      forceParaphraseOf:
+        question.turn_index === 3 && firstResponse
+          ? {
+              question: firstResponse.question,
+              conceptTag: firstResponse.concept_tag,
+            }
+          : undefined,
+    });
+
+    const integrity = await computeIntegrityEvidence({
+      answer: parsed.data.answer,
+      referenceAnswer: question.reference_answer,
+      latencyMs: parsed.data.latencyMs,
+      priorLatencies: priorResponses.flatMap((response) =>
+        response.latency_ms === null ? [] : [response.latency_ms],
+      ),
+      evaluation,
+      followUpTarget,
+      consistencyTarget,
     });
 
     const response = await insertRow<ResponseRow>("responses", {
       session_id: sessionId,
-      turn_index: parsed.data.turnIndex,
-      question: parsed.data.question,
-      concept_tag: parsed.data.conceptTag,
-      question_type: parsed.data.questionType,
+      question_id: question.id,
+      turn_index: question.turn_index,
+      question: question.question,
+      concept_tag: question.concept_tag,
+      question_type: question.question_type,
       answer: parsed.data.answer,
       latency_ms: parsed.data.latencyMs,
       score: evaluation.overallScore,
       depth_score: evaluation.depthScore,
       confidence_score: evaluation.confidenceScore,
-      signal_scores: {},
+      signal_scores: integrity,
       evaluation: {
         correctnessScore: evaluation.correctnessScore,
         reasoningScore: evaluation.reasoningScore,
@@ -105,12 +159,12 @@ export async function POST(
         feedback: evaluation.feedback,
         summary: evaluation.summary,
       },
-      canonical_answer: evaluation.canonicalAnswer,
-      follow_up_of: parsed.data.followUpOf ?? null,
-      is_paraphrase_of: null,
+      canonical_answer: question.reference_answer,
+      follow_up_of: question.follow_up_of,
+      is_paraphrase_of: question.paraphrase_of,
     });
 
-    const completed = parsed.data.turnIndex >= MAX_EXAM_TURNS;
+    const completed = question.turn_index >= MAX_EXAM_TURNS;
     const allScores = [
       ...priorResponses.flatMap((item) =>
         item.score === null ? [] : [item.score],
@@ -123,11 +177,41 @@ export async function POST(
       ),
       evaluation.depthScore,
     ];
+    const integrityRisk = aggregateIntegrityRisk(priorResponses, integrity);
     const runningScores = {
       overall: average(allScores),
       depth: average(allDepthScores),
       turns: allScores.length,
+      integrityRisk,
     };
+
+    let nextQuestion: ExamQuestionRow | null = null;
+
+    if (!completed) {
+      const forceConsistencyCheck =
+        question.turn_index === 3 && Boolean(firstResponse);
+      const nextQuestionType = forceConsistencyCheck
+        ? "consistency_check"
+        : evaluation.nextQuestionType === "consistency_check"
+          ? "deeper"
+          : evaluation.nextQuestionType;
+      const nextFollowUpOf =
+        nextQuestionType === "follow_up" || nextQuestionType === "deeper"
+          ? response.id
+          : null;
+
+      nextQuestion = await insertRow<ExamQuestionRow>("exam_questions", {
+        session_id: sessionId,
+        turn_index: question.turn_index + 1,
+        question: evaluation.nextQuestion,
+        concept_tag: evaluation.conceptTag,
+        question_type: nextQuestionType,
+        difficulty: evaluation.nextDifficulty,
+        reference_answer: evaluation.nextReferenceAnswer,
+        follow_up_of: nextFollowUpOf,
+        paraphrase_of: forceConsistencyCheck ? firstResponse.id : null,
+      });
+    }
 
     await updateRow<ExamSessionRow>("exam_sessions", sessionId, {
       difficulty: evaluation.nextDifficulty,
@@ -142,21 +226,29 @@ export async function POST(
 
     return NextResponse.json({
       responseId: response.id,
-      evaluation,
+      evaluation: {
+        overallScore: evaluation.overallScore,
+        correctnessScore: evaluation.correctnessScore,
+        depthScore: evaluation.depthScore,
+        reasoningScore: evaluation.reasoningScore,
+        examplesScore: evaluation.examplesScore,
+        confidenceScore: evaluation.confidenceScore,
+        feedback: evaluation.feedback,
+        summary: evaluation.summary,
+        consistencyCheck: evaluation.consistencyCheck,
+      },
+      integrity,
       runningScores,
       completed,
-      next: completed
+      next: !nextQuestion
         ? null
         : {
-            turnIndex: parsed.data.turnIndex + 1,
-            question: evaluation.nextQuestion,
-            conceptTag: evaluation.conceptTag,
-            questionType: evaluation.nextQuestionType,
-            followUpOf:
-              evaluation.nextQuestionType === "follow_up"
-                ? response.id
-                : null,
-            difficulty: evaluation.nextDifficulty,
+            questionId: nextQuestion.id,
+            turnIndex: nextQuestion.turn_index,
+            question: nextQuestion.question,
+            conceptTag: nextQuestion.concept_tag,
+            questionType: nextQuestion.question_type,
+            difficulty: nextQuestion.difficulty,
           },
     });
   } catch (error) {
